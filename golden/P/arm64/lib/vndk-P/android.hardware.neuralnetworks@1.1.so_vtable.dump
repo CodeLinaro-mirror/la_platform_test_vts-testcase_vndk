@@ -16,7 +16,7 @@ _ZTVN7android8hardware14neuralnetworks4V1_110BpHwDeviceE: 24 entries
 76    (int (*)(...)) _ZN7android8hardware14neuralnetworks4V1_110BpHwDevice9getStatusEv
 80    (int (*)(...)) _ZN7android8hardware14neuralnetworks4V1_110BpHwDevice19getCapabilities_1_1ENSt3__18functionIFvNS1_4V1_011ErrorStatusERKNS2_12CapabilitiesEEEE
 84    (int (*)(...)) _ZN7android8hardware14neuralnetworks4V1_110BpHwDevice26getSupportedOperations_1_1ERKNS2_5ModelENSt3__18functionIFvNS1_4V1_011ErrorStatusERKNS0_8hidl_vecIbEEEEE
-88    (int (*)(...)) _ZN7android8hardware14neuralnetworks4V1_110BpHwDevice16prepareModel_1_1ERKNS2_5ModelERKNS_2spINS1_4V1_022IPreparedModelCallbackEEE
+88    (int (*)(...)) _ZN7android8hardware14neuralnetworks4V1_110BpHwDevice16prepareModel_1_1ERKNS2_5ModelENS2_19ExecutionPreferenceERKNS_2spINS1_4V1_022IPreparedModelCallbackEEE
 140    (int (*)(...)) _ZN7android8hardware11BpHwRefBase10onFirstRefEv
 144    (int (*)(...)) _ZN7android8hardware11BpHwRefBase15onLastStrongRefEPKv
 148    (int (*)(...)) _ZN7android8hardware11BpHwRefBase20onIncStrongAttemptedEjPKv
