@@ -1,5 +1,5 @@
 vtable for android::hardware::BHwBinder
-_ZTVN7android8hardware9BHwBinderE: 19 entries
+_ZTVN7android8hardware9BHwBinderE: 18 entries
 12    (int (*)(...)) _ZN7android8hardware9BHwBinder8transactEjRKNS0_6ParcelEPS2_jNSt3__18functionIFvRS2_EEE
 16    (int (*)(...)) _ZN7android8hardware9BHwBinder11linkToDeathERKNS_2spINS0_7IBinder14DeathRecipientEEEPvj
 20    (int (*)(...)) _ZN7android8hardware9BHwBinder13unlinkToDeathERKNS_2wpINS0_7IBinder14DeathRecipientEEEPvjPS5_
@@ -18,11 +18,10 @@ _ZTVN7android8hardware9BHwBinderE: 19 entries
 100    (int (*)(...)) _ZN7android7RefBase15onLastStrongRefEPKv
 104    (int (*)(...)) _ZN7android7RefBase20onIncStrongAttemptedEjPKv
 108    (int (*)(...)) _ZN7android7RefBase13onLastWeakRefEPKv
-112    (int (*)(...)) _ZTVN7android8hardware9BHwBinderE
 
 
 vtable for android::hardware::BpHwRefBase
-_ZTVN7android8hardware11BpHwRefBaseE: 12 entries
+_ZTVN7android8hardware11BpHwRefBaseE: 11 entries
 12    (int (*)(...)) _ZN7android8hardware11BpHwRefBaseD1Ev
 16    (int (*)(...)) _ZN7android8hardware11BpHwRefBaseD0Ev
 20    (int (*)(...)) _ZN7android8hardware11BpHwRefBase10onFirstRefEv
@@ -34,11 +33,10 @@ _ZTVN7android8hardware11BpHwRefBaseE: 12 entries
 72    (int (*)(...)) _ZTv0_n20_N7android8hardware11BpHwRefBase15onLastStrongRefEPKv
 76    (int (*)(...)) _ZTv0_n24_N7android8hardware11BpHwRefBase20onIncStrongAttemptedEjPKv
 80    (int (*)(...)) _ZN7android7RefBase13onLastWeakRefEPKv
-84    (int (*)(...)) _ZTVN7android8hardware11BpHwRefBaseE
 
 
 vtable for android::hardware::IBinder
-_ZTVN7android8hardware7IBinderE: 12 entries
+_ZTVN7android8hardware7IBinderE: 11 entries
 24    (int (*)(...)) _ZNK7android8hardware7IBinder13checkSubclassEPKv
 40    (int (*)(...)) _ZN7android8hardware7IBinder11localBinderEv
 44    (int (*)(...)) _ZN7android8hardware7IBinder12remoteBinderEv
@@ -50,11 +48,10 @@ _ZTVN7android8hardware7IBinderE: 12 entries
 96    (int (*)(...)) _ZN7android7RefBase15onLastStrongRefEPKv
 100    (int (*)(...)) _ZN7android7RefBase20onIncStrongAttemptedEjPKv
 104    (int (*)(...)) _ZN7android7RefBase13onLastWeakRefEPKv
-108    (int (*)(...)) _ZTVN7android8hardware7IBinderE
 
 
 vtable for android::hardware::BpHwBinder
-_ZTVN7android8hardware10BpHwBinderE: 21 entries
+_ZTVN7android8hardware10BpHwBinderE: 20 entries
 12    (int (*)(...)) _ZN7android8hardware10BpHwBinder8transactEjRKNS0_6ParcelEPS2_jNSt3__18functionIFvRS2_EEE
 16    (int (*)(...)) _ZN7android8hardware10BpHwBinder11linkToDeathERKNS_2spINS0_7IBinder14DeathRecipientEEEPvj
 20    (int (*)(...)) _ZN7android8hardware10BpHwBinder13unlinkToDeathERKNS_2wpINS0_7IBinder14DeathRecipientEEEPvjPS5_
@@ -75,7 +72,6 @@ _ZTVN7android8hardware10BpHwBinderE: 21 entries
 108    (int (*)(...)) _ZTv0_n20_N7android8hardware10BpHwBinder15onLastStrongRefEPKv
 112    (int (*)(...)) _ZTv0_n24_N7android8hardware10BpHwBinder20onIncStrongAttemptedEjPKv
 116    (int (*)(...)) _ZN7android7RefBase13onLastWeakRefEPKv
-120    (int (*)(...)) _ZTVN7android8hardware10BpHwBinderE
 
 
 vtable for android::hardware::BufferedTextOutput
@@ -89,7 +85,7 @@ _ZTVN7android8hardware18BufferedTextOutputE: 6 entries
 
 
 vtable for android::hardware::IInterface
-_ZTVN7android8hardware10IInterfaceE: 9 entries
+_ZTVN7android8hardware10IInterfaceE: 8 entries
 12    (int (*)(...)) _ZN7android8hardware10IInterfaceD1Ev
 16    (int (*)(...)) _ZN7android8hardware10IInterfaceD0Ev
 52    (int (*)(...)) _ZTv0_n12_N7android8hardware10IInterfaceD1Ev
@@ -98,11 +94,10 @@ _ZTVN7android8hardware10IInterfaceE: 9 entries
 64    (int (*)(...)) _ZN7android7RefBase15onLastStrongRefEPKv
 68    (int (*)(...)) _ZN7android7RefBase20onIncStrongAttemptedEjPKv
 72    (int (*)(...)) _ZN7android7RefBase13onLastWeakRefEPKv
-76    (int (*)(...)) _ZTVN7android8hardware10IInterfaceE
 
 
 vtable for android::hardware::ProcessState
-_ZTVN7android8hardware12ProcessStateE: 9 entries
+_ZTVN7android8hardware12ProcessStateE: 8 entries
 12    (int (*)(...)) _ZN7android8hardware12ProcessStateD1Ev
 16    (int (*)(...)) _ZN7android8hardware12ProcessStateD0Ev
 48    (int (*)(...)) _ZTv0_n12_N7android8hardware12ProcessStateD1Ev
@@ -111,7 +106,6 @@ _ZTVN7android8hardware12ProcessStateE: 9 entries
 60    (int (*)(...)) _ZN7android7RefBase15onLastStrongRefEPKv
 64    (int (*)(...)) _ZN7android7RefBase20onIncStrongAttemptedEjPKv
 68    (int (*)(...)) _ZN7android7RefBase13onLastWeakRefEPKv
-72    (int (*)(...)) _ZTVN7android8hardware12ProcessStateE
 
 
 vtable for android::hardware::TextOutput
