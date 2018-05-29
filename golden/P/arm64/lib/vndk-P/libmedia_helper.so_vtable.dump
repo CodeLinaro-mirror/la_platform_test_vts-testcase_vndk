@@ -1,4 +1,0 @@
-vtable for android::AudioParameter
-_ZTVN7android14AudioParameterE: 2 entries
-8    (int (*)(...)) _ZN7android14AudioParameterD2Ev
-12    (int (*)(...)) _ZN7android14AudioParameterD0Ev
