@@ -16,10 +16,13 @@
 #
 
 import argparse
+import gzip
 import importlib
 import os
 import subprocess
 import sys
+
+from google.protobuf import text_format
 
 
 class ExternalModules(object):
@@ -29,24 +32,28 @@ class ExternalModules(object):
     are outside the search path and thus have to be imported dynamically.
 
     Attribtues:
-        ar_parser: The ar_parser module.
         elf_parser: The elf_parser module.
-        vtable_parser: The vtable_parser module.
+        VndkAbiDump: The VndkAbiDump_pb2 module.
+        AbiDump: The abi_dump_pb2 module.
+        build_top_dir: The path to root directory of Android source.
     """
     @classmethod
-    def ImportParsers(cls, import_dir):
-        """Imports elf_parser and vtable_parser.
+    def ImportParsers(cls, build_top_dir):
+        """Imports elf_parser and proto modules.
 
         Args:
-            import_dir: The directory containing vts.utils.python.library.*.
+            build_top_dir: The path to root directory of Android source.
         """
-        sys.path.append(import_dir)
-        cls.ar_parser = importlib.import_module(
-            "vts.utils.python.library.ar_parser")
+        sys.path.append(os.path.join(build_top_dir, 'test'))
+        sys.path.append(os.path.join(build_top_dir, 'test', 'vts-testcase'))
+        sys.path.append(os.path.join(build_top_dir, 'development', 'vndk',
+                                     'tools', 'header-checker'))
         cls.elf_parser = importlib.import_module(
             "vts.utils.python.library.elf_parser")
-        cls.vtable_parser = importlib.import_module(
-            "vts.utils.python.library.vtable_parser")
+        cls.VndkAbiDump = importlib.import_module(
+            "vndk.proto.VndkAbiDump_pb2")
+        cls.AbiDump = importlib.import_module("proto.abi_dump_pb2")
+        cls.build_top_dir = build_top_dir
 
 
 def _CreateAndWrite(path, data):
@@ -84,6 +91,27 @@ def _ExecuteCommand(cmd, **kwargs):
     return stdout.strip()
 
 
+def _EncodeLsdump(msg):
+    """Encode a text format abi_dump.TranslationUnit message to binary format.
+
+    Args:
+        msg: A string containing the text format message.
+
+    Returns:
+        A string containing the encoded result.
+    """
+    cmd = [
+        'protoc',
+        '-I/',
+        '--encode=abi_dump.TranslationUnit',
+        os.path.join(ExternalModules.build_top_dir, 'development', 'vndk',
+                     'tools', 'header-checker', 'proto', 'abi_dump.proto'),
+    ]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    stdout, stderr = proc.communicate(msg)
+    return stdout
+
+
 def GetBuildVariables(build_top_dir, abs_path, vars):
     """Gets values of variables from build config.
 
@@ -102,95 +130,245 @@ def GetBuildVariables(build_top_dir, abs_path, vars):
     return [line.split("=", 1)[1].strip("'") for line in stdout.splitlines()]
 
 
-def FindBinary(file_name):
-    """Finds an executable binary in environment variable PATH.
-
-    Args:
-        file_name: The file name to find.
-
-    Returns:
-        A string which is the path to the binary.
-    """
-    return _ExecuteCommand(["which", file_name])
-
-
-def DumpSymbols(lib_path, dump_path, exclude_symbols):
-    """Dump symbols from a library to a dump file.
-
-    The dump file is a sorted list of symbols. Each line contains one symbol.
+def _CollectSymbols(lib_path, include_weak):
+    """Collects symbols from a library.
 
     Args:
         lib_path: The path to the library.
-        dump_path: The path to the dump file.
-        exclude_symbols: A set of strings, the symbols that should not be
-                         written to the dump file.
+        include_weak: A boolean, whether to include weak symbols.
 
     Returns:
-        A list of strings which are the symbols written to the dump file.
+        A list of symbols.
 
     Raises:
         elf_parser.ElfError if fails to load the library.
-        IOError if fails to write to the dump.
     """
     elf_parser = ExternalModules.elf_parser
     parser = None
     try:
         parser = elf_parser.ElfParser(lib_path)
-        symbols = [x for x in parser.ListGlobalDynamicSymbols()
-                   if x not in exclude_symbols]
+        symbols = parser.ListGlobalDynamicSymbols(include_weak)
     finally:
         if parser:
             parser.Close()
-    if symbols:
-        symbols.sort()
-        _CreateAndWrite(dump_path, "\n".join(symbols) + "\n")
     return symbols
 
 
-def DumpVtables(lib_path, dump_path, dumper_dir, include_symbols):
-    """Dump vtables from a library to a dump file.
+def DumpAbiFromLsdump(lib_path, lib_lsdump_path, dump_path, abi_bitness):
+    """Dump abi from a lsdump to a dump file.
 
-    The dump file is the raw output of vndk-vtable-dumper.
+    The dump file is a vts.proto.VndkAbiDump_pb2.AbiDump() message.
 
     Args:
         lib_path: The path to the library.
-        dump_path: The path to the text file.
-        dumper_dir: The path to the directory containing the dumper executable
-                    and library.
-        include_symbols: A set of strings. A vtable is written to the dump file
-                         only if its symbol is in the set.
+        lib_lsdump_path: The path to the (gzipped) lsdump file.
+        dump_path: The path to the output text file.
+        abi_bitness: A string describing the bitness of the target abi. The
+                     value should be '32' or '64'.
 
     Returns:
         A string which is the content written to the dump file.
+        None if no dump file is created.
 
     Raises:
-        vtable_parser.VtableError if fails to load the library.
-        IOError if fails to write to the dump.
+        IOError if fails to write to the dump file.
     """
-    vtable_parser = ExternalModules.vtable_parser
-    parser = vtable_parser.VtableParser(dumper_dir)
+    VndkAbiDump = ExternalModules.VndkAbiDump
+    AbiDump = ExternalModules.AbiDump
 
-    def GenerateLines():
-        for line in parser.CallVtableDumper(lib_path).split("\n"):
-            parsed_lines.append(line)
-            yield line
+    if os.path.isfile(lib_lsdump_path + '.gz'):
+        with gzip.open(lib_lsdump_path + '.gz', 'rb') as f:
+            lsdump_content = f.read()
+    elif os.path.isfile(lib_lsdump_path):
+        with open(lib_lsdump_path, 'rb') as f:
+            lsdump_content = f.read()
+    else:
+        print('Warning: Missing library lsdump')
+        return None
 
-    lines = GenerateLines()
-    dump_lines = []
+    lsdump_binary = _EncodeLsdump(lsdump_content)
     try:
-        while True:
-            parsed_lines = []
-            vtable, entries = parser.ParseOneVtable(lines)
-            if vtable in include_symbols:
-                dump_lines.extend(parsed_lines)
-    except StopIteration:
-        pass
+        tu = AbiDump.TranslationUnit.FromString(lsdump_binary)
+    except:
+        print('Warning: Cannot parse lsdump')
+        return None
 
-    dump_string = "\n".join(dump_lines).strip("\n")
-    if dump_string:
-        dump_string += "\n"
-        _CreateAndWrite(dump_path, dump_string)
-    return dump_string
+    abi_dump = VndkAbiDump.AbiDump()
+    ParseVtablesFromLsdump(abi_dump, tu, abi_bitness)
+    ParseSymbolsFromLsdump(abi_dump, tu)
+
+    # Tag symbol bindings with symbols collected from the library.
+    global_symbols = {x for x in _CollectSymbols(lib_path, False)}
+    weak_symbols = {x for x in _CollectSymbols(lib_path, True)
+                    if x not in global_symbols}
+    for symbol in abi_dump.symbols:
+        if symbol.name in global_symbols:
+            symbol.binding = VndkAbiDump.Symbol.GLOBAL
+        elif symbol.name in weak_symbols:
+            symbol.binding = VndkAbiDump.Symbol.WEAK
+        else:
+            print('Warning: Cannot resolve symbol binding {}'
+                  .format(symbol.name))
+
+    abi_dump_text = text_format.MessageToString(abi_dump)
+    _CreateAndWrite(dump_path, abi_dump_text)
+    return abi_dump_text
+
+
+def ParseVtablesFromLsdump(abi_dump, tu, abi_bitness):
+    """Parses vtables from a lsdump.
+
+    Args:
+        abi_dump: A VndkAbiDump_pb2.AbiDump() message to store the parsed
+                  result to.
+        tu: A abi_dump_pb2.TranslationUnit() message containing the content of
+            lsdump.
+        abi_bitness: A string describing the bitness of the target abi. The
+                     value should be '32' or '64'.
+    """
+    VndkAbiDump = ExternalModules.VndkAbiDump
+    AbiDump = ExternalModules.AbiDump
+
+    assert(abi_bitness in ['32', '64'])
+    offset_unit = {'32': 4, '64': 8}[abi_bitness]
+    vtable_names = {e.name for e in tu.elf_objects if e.name.startswith('_ZTV')}
+    function_name_demangle = {function.linker_set_key: function.function_name
+                              for function in tu.functions}
+
+    lsdump = AbiDump.VTableComponent
+    vtable_function_kind = [
+        lsdump.FunctionPointer,
+        lsdump.CompleteDtorPointer,
+        lsdump.DeletingDtorPointer,
+        lsdump.UnusedFunctionPointer,
+    ]
+    vtable_entry_kind = {
+        lsdump.VCallOffset: VndkAbiDump.VTableEntry.VCALLOFFSET,
+        lsdump.VBaseOffset: VndkAbiDump.VTableEntry.VBASEOFFSET,
+        lsdump.OffsetToTop: VndkAbiDump.VTableEntry.OFFSETTOTOP,
+        lsdump.RTTI: VndkAbiDump.VTableEntry.RTTI,
+        lsdump.FunctionPointer: VndkAbiDump.VTableEntry.VFUNCPOINTER,
+        lsdump.CompleteDtorPointer: VndkAbiDump.VTableEntry.COMPLETEDTORPOINTER,
+        lsdump.DeletingDtorPointer: VndkAbiDump.VTableEntry.DELETINGDTORPOINTER,
+        lsdump.UnusedFunctionPointer: VndkAbiDump.VTableEntry.VFUNCPOINTER,
+    }
+
+    for record_type in tu.record_types:
+        name = record_type.tag_info.unique_id
+        vtable_name = '_ZTV' + name[len('_ZTS'):]
+        if vtable_name not in vtable_names:
+            continue
+        vtable = abi_dump.vtables.add()
+        vtable.name = vtable_name
+        vtable.demangled_name = record_type.type_info.name
+        for idx, vtable_component in enumerate(
+                record_type.vtable_layout.vtable_components):
+            if vtable_component.kind not in vtable_entry_kind:
+                print('Warning: Unexpected vtable_component kind\n{}'
+                      .format(text_format.MessageToString(vtable_component)))
+                continue
+            vtable_entry = vtable.vtable_entries.add()
+            vtable_entry.offset = idx * offset_unit
+            vtable_entry.kind = vtable_entry_kind[vtable_component.kind]
+            if vtable_component.kind in vtable_function_kind:
+                vtable_entry.name = vtable_component.mangled_component_name
+                if vtable_entry.name in function_name_demangle:
+                    vtable_entry.demangled_name = (
+                        function_name_demangle[vtable_entry.name])
+                if vtable_component.is_pure:
+                    vtable_entry.is_pure = True
+            elif vtable_component.kind == lsdump.RTTI:
+                vtable_entry.name = vtable_component.mangled_component_name
+
+
+def ParseSymbolsFromLsdump(abi_dump, tu):
+    """Parses symbols from a lsdump.
+
+    Args:
+        abi_dump: A VndkAbiDump_pb2.AbiDump() message to store the parsed
+                  result to.
+        tu: A abi_dump_pb2.TranslationUnit() message containing the content of
+            lsdump.
+    """
+    VndkAbiDump = ExternalModules.VndkAbiDump
+
+    global_vars = {global_var.linker_set_key for global_var in tu.global_vars}
+    functions = {function.linker_set_key for function in tu.functions}
+    elf_objects = {elf_object.name for elf_object in tu.elf_objects}
+    elf_functions = {elf_function.name for elf_function in tu.elf_functions}
+
+    def CollectInterestingSymbols():
+        """Collects compiler generated symbols that defines part of the abi.
+
+        _ZTV, _ZTT: Virtual table & VTT.
+        _ZTI, _ZTS: Typeinfo structure & typeinfo name.
+        _ZTh, _ZTv, _ZTc: Thunk symbols.
+        """
+        record_names = {record_type.tag_info.unique_id[len('_ZTS'):]
+                        for record_type in tu.record_types}
+        # Collect _ZT[VTIS] symbols whose base record type is in lsdump.
+        for e in elf_objects - global_vars:
+            if e[:len('_ZTV')] in {'_ZTV', '_ZTT', 'ZTI', 'ZTS'}:
+                if e[len('_ZTV'):] in record_names:
+                    yield e
+        # Collect _ZT[hvc] symbols whose target function is exported by lsdump.
+        for e in elf_functions - functions:
+            nominal_target = _FindThunkBase(e)
+            if nominal_target and nominal_target in functions:
+                yield e
+
+    symbols = global_vars | functions | set(CollectInterestingSymbols())
+    abi_dump.symbols.extend(VndkAbiDump.Symbol(name=symbol)
+                            for symbol in symbols)
+
+
+def _FindThunkBase(name):
+    """Finds thunk symbol's base function.
+
+    <thunk-symbol> ::= _ZT <call-offset> <base-encoding>
+                        | _ZTc <call-offset> <call-offset> <base-encoding>
+    <call-offset>  ::= h <nv-offset>
+                        | v <v-offset>
+    <nv-offset>    ::= <offset-number> _
+    <v-offset>     ::= <offset-number> _ <offset-number> _
+
+    Args:
+        name: A string, the symbol name to resolve.
+
+    Returns:
+        A string, symbol name of the nominal target function (base function).
+        None if name is not a thunk symbol.
+    """
+    def ConsumeOffset(tok, beg=0):
+        """Consumes a <offset-number>."""
+        pos = tok.find('_', beg) + 1
+        return tok[:pos], tok[pos:]
+
+    def ConsumeCallOffset(tok):
+        """Consumes a <call-offset>."""
+        if tok[:1] == 'h':
+            lhs, rhs = ConsumeOffset(tok, 1)
+        elif tok[:1] == 'v':
+            lhs, rhs = ConsumeOffset(tok, 1)
+            lhs2, rhs = ConsumeOffset(rhs)
+            if lhs and lhs2:
+                lhs = lhs + lhs2
+            else:
+                lhs, rhs = '', tok
+        else:
+            lhs, rhs = '', tok
+        return lhs, rhs
+
+    if name.startswith('_ZTh') or name.startswith('_ZTv'):
+        lhs, rhs = ConsumeCallOffset(name[len('_ZT'):])
+        if lhs:
+            return '_Z' + rhs
+    if name.startswith('_ZTc'):
+        lhs, rhs = ConsumeCallOffset(name[len('_ZTc'):])
+        lhs2, rhs = ConsumeCallOffset(rhs)
+        if lhs and lhs2:
+            return '_Z' + rhs
+    return None
 
 
 def _LoadLibraryNamesFromTxt(vndk_lib_list_file):
@@ -265,8 +443,7 @@ def _CollectLibraryPaths(root_dirs):
     return paths
 
 
-def DumpAbi(output_dir, lib_names, lib_dir, vndk_version, object_dir,
-            dumper_dir):
+def DumpAbi(output_dir, lib_names, lib_dir, vndk_version, lsdump_path):
     """Generates dump from libraries.
 
     Args:
@@ -274,27 +451,22 @@ def DumpAbi(output_dir, lib_names, lib_dir, vndk_version, object_dir,
         lib_names: The names of the libraries to dump.
         lib_dir: The path to the directory containing the libraries to dump.
         vndk_version: The VNDK version for shared libraries to dump.
-        object_dir: The path to the directory containing intermediate objects.
-        dumper_dir: The path to the directory containing the vtable dumper
-                    executable and library.
+        lsdump_path: The path to the directory containing lsdumps.
 
     Returns:
         A list of strings, the paths to the libraries not found in lib_dir.
     """
-    ar_parser = ExternalModules.ar_parser
-    static_symbols = set()
-    for ar_name in ("libgcc", "libatomic", "libcompiler_rt-extras"):
-        ar_path = os.path.join(
-            object_dir, "STATIC_LIBRARIES", ar_name + "_intermediates",
-            ar_name + ".a")
-        static_symbols.update(ar_parser.ListGlobalSymbols(ar_path))
-
     lib_paths = _CollectLibraryPaths([
         os.path.join(lib_dir, "vndk-" + vndk_version),
         os.path.join(lib_dir, "vndk-sp-" + vndk_version)])
 
     missing_libs = []
-    dump_dir = os.path.join(output_dir, os.path.basename(lib_dir))
+    lib_bitness = os.path.basename(lib_dir)
+    assert lib_bitness in ['lib', 'lib64'], (
+        'Unexpected lib_dir: {} lib_dir should end with '
+        '"lib" or "lib64"'.format(lib_dir))
+    dump_dir = os.path.join(output_dir, lib_bitness)
+    abi_bitness = {'lib': '32', 'lib64': '64'}[lib_bitness]
     for lib_name in lib_names:
         try:
             lib_path = lib_paths[lib_name]
@@ -306,28 +478,31 @@ def DumpAbi(output_dir, lib_names, lib_dir, vndk_version, object_dir,
             print("")
             continue
 
-        lib_name = os.path.relpath(lib_path, lib_dir)
-        symbol_dump_path = os.path.join(dump_dir, lib_name + "_symbol.dump")
-        vtable_dump_path = os.path.join(dump_dir, lib_name + "_vtable.dump")
         print(lib_path)
         if not os.path.isfile(lib_path):
             missing_libs.append(lib_path)
             print("Warning: Not found")
             print("")
             continue
-        symbols = DumpSymbols(lib_path, symbol_dump_path, static_symbols)
-        if symbols:
-            print("Output: " + symbol_dump_path)
+
+        lib_pathname = os.path.relpath(lib_path, lib_dir)
+        abi_dump_path = os.path.join(dump_dir, lib_pathname + '.abi.dump')
+        lib_lsdump_path = os.path.join(lsdump_path, lib_name + '.lsdump')
+
+        abi_dump = DumpAbiFromLsdump(lib_path, lib_lsdump_path, abi_dump_path,
+                                     abi_bitness)
+        if abi_dump is not None:
+            print("Output: " + abi_dump_path)
         else:
-            print("No symbols")
-        vtables = DumpVtables(
-            lib_path, vtable_dump_path, dumper_dir, set(symbols))
-        if vtables:
-            print("Output: " + vtable_dump_path)
-        else:
-            print("No vtables")
+            print("No abidump created")
         print("")
     return missing_libs
+
+
+def _GetTargetArchDir(target_arch, target_arch_variant):
+    if target_arch == target_arch_variant:
+        return target_arch
+    return '{}_{}'.format(target_arch, target_arch_variant)
 
 
 def main():
@@ -337,12 +512,6 @@ def main():
                             help="the libraries to dump. Each file can be "
                                  ".so or .txt. The text file can be found at "
                                  "build/make/target/product/vndk/current.txt.")
-    arg_parser.add_argument("--dumper-dir", "-d", action="store",
-                            help="the path to the directory containing "
-                                 "bin/vndk-vtable-dumper.")
-    arg_parser.add_argument("--import-path", "-i", action="store",
-                            help="the directory for VTS python modules. "
-                                 "Default value is $ANDROID_BUILD_TOP/test")
     arg_parser.add_argument("--output", "-o", action="store",
                             help="output directory for ABI reference dump. "
                                  "Default value is PLATFORM_VNDK_VERSION.")
@@ -356,35 +525,39 @@ def main():
     (binder_32_bit,
      vndk_version,
      target_arch,
-     target_2nd_arch) = GetBuildVariables(
+     target_arch_variant,
+     target_2nd_arch,
+     target_2nd_arch_variant) = GetBuildVariables(
         build_top_dir, abs_path=False, vars=(
             "BINDER32BIT",
             "PLATFORM_VNDK_VERSION",
             "TARGET_ARCH",
-            "TARGET_2ND_ARCH"))
+            "TARGET_ARCH_VARIANT",
+            "TARGET_2ND_ARCH",
+            "TARGET_2ND_ARCH_VARIANT"))
 
     (target_lib_dir,
-     target_obj_dir,
-     target_2nd_lib_dir,
-     target_2nd_obj_dir) = GetBuildVariables(
+     target_2nd_lib_dir) = GetBuildVariables(
         build_top_dir, abs_path=True, vars=(
             "TARGET_OUT_SHARED_LIBRARIES",
-            "TARGET_OUT_INTERMEDIATES",
-            "2ND_TARGET_OUT_SHARED_LIBRARIES",
-            "2ND_TARGET_OUT_INTERMEDIATES"))
+            "2ND_TARGET_OUT_SHARED_LIBRARIES"))
 
-    # Import elf_parser and vtable_parser
-    ExternalModules.ImportParsers(args.import_path if args.import_path else
-                                  os.path.join(build_top_dir, "test"))
+    binder_bitness = '32' if binder_32_bit else '64'
 
-    # Find vtable dumper
-    if args.dumper_dir:
-        dumper_dir = args.dumper_dir
-    else:
-        dumper_path = FindBinary(
-            ExternalModules.vtable_parser.VtableParser.VNDK_VTABLE_DUMPER)
-        dumper_dir = os.path.dirname(os.path.dirname(dumper_path))
-    print("DUMPER_DIR=" + dumper_dir)
+    # Import elf_parser and proto modules
+    ExternalModules.ImportParsers(build_top_dir)
+
+    # Generate vtable dump from lsdump in TOP/prebuilts/abi-dumps
+    lsdump_path_base = os.path.join(build_top_dir, 'prebuilts', 'abi-dumps',
+                                    'vndk', vndk_version, binder_bitness)
+    lsdump_path = os.path.join(
+        lsdump_path_base,
+        _GetTargetArchDir(target_arch, target_arch_variant),
+        'source-based')
+    lsdump_path_2nd = os.path.join(
+        lsdump_path_base,
+        _GetTargetArchDir(target_2nd_arch, target_2nd_arch_variant),
+        'source-based')
 
     output_dir = os.path.join((args.output if args.output else vndk_version),
                               ("binder32" if binder_32_bit else "binder64"),
@@ -394,10 +567,10 @@ def main():
     lib_names = _LoadLibraryNames(args.file)
 
     missing_libs = DumpAbi(output_dir, lib_names, target_lib_dir, vndk_version,
-                           target_obj_dir, dumper_dir)
+                           lsdump_path)
     if target_2nd_arch:
         missing_libs += DumpAbi(output_dir, lib_names, target_2nd_lib_dir,
-                                vndk_version, target_2nd_obj_dir, dumper_dir)
+                                vndk_version, lsdump_path_2nd)
 
     if missing_libs:
         print("Warning: Could not find libraries:")
