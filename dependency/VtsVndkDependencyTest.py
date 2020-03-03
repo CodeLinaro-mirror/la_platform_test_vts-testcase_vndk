@@ -15,6 +15,8 @@
 # limitations under the License.
 #
 
+# TODO(b/147454897): Keep the test logic in sync with vts_vndk_dependency.py
+#                    until this file is removed.
 import collections
 import logging
 import os
